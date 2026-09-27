@@ -10,6 +10,7 @@ import type {
   StepProgress,
   StudioInfo
 } from '../shared/types'
+import { MAX_REFERENCE_IMAGES } from '../shared/types'
 import {
   DIFFUSION_MODEL,
   GPU_BACKEND,
@@ -20,6 +21,8 @@ import {
 } from './modelConfig'
 
 const MAX_INIT_IMAGE_BYTES = 3 * 1024 * 1024
+
+type DiffusionParams = Parameters<typeof diffusion>[0]
 
 export interface StudioEvents {
   status: (s: ModelStatus) => void
@@ -97,15 +100,21 @@ export class Studio {
       throw new Error(status.state === 'error' ? status.message : 'Model is not loaded')
     }
     if (this.generating) throw new Error('A generation is already running')
-    // The SDK's base64 validation overflows the stack on very large payloads.
-    if (req.initImage && req.initImage.byteLength > MAX_INIT_IMAGE_BYTES) {
-      throw new Error('The image to edit is too large; use one under 3 MB')
+    const refs = req.initImages ?? []
+    if (refs.length > MAX_REFERENCE_IMAGES) {
+      throw new Error(`Use at most ${MAX_REFERENCE_IMAGES} reference images`)
     }
+    // The SDK's base64 validation overflows the stack on very large payloads.
+    refs.forEach((img, i) => {
+      if (img.byteLength > MAX_INIT_IMAGE_BYTES) {
+        throw new Error(`@image${i + 1} is too large; use one under 3 MB`)
+      }
+    })
     this.generating = true
     // Resolve a random seed here so the result reports a reproducible value.
     const seed = req.seed >= 0 ? req.seed : Math.floor(Math.random() * 2 ** 31)
     try {
-      const { progressStream, outputs, stats } = diffusion({
+      const base = {
         modelId: status.modelId,
         prompt: req.prompt,
         width: req.width,
@@ -114,9 +123,18 @@ export class Studio {
         guidance: req.guidance,
         // FLUX.2 [klein] is guidance-distilled; classic CFG stays off.
         cfg_scale: 1,
-        seed,
-        ...(req.initImage ? { init_image: req.initImage } : {})
-      })
+        seed
+      }
+      // One image is a plain FLUX.2 edit; several use multi-reference fusion,
+      // where the model attends to every image and @imageN tags in the prompt
+      // are plain words that point at them.
+      const params: DiffusionParams =
+        refs.length > 1
+          ? { ...base, init_images: refs }
+          : refs.length === 1
+            ? { ...base, init_image: refs[0] }
+            : base
+      const { progressStream, outputs, stats } = diffusion(params)
       for await (const tick of progressStream) this.events.step(tick)
       const [png] = await outputs
       if (!png) throw new Error('The model returned no image')

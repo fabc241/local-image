@@ -1,5 +1,9 @@
 // Types shared by the main process, the preload bridge and the renderer.
 
+// FLUX.2 [klein] multi-reference editing: every extra image adds its full
+// latent to the attention context, so time and memory grow with each one.
+export const MAX_REFERENCE_IMAGES = 4
+
 export interface ModelFileInfo {
   name: string
   file: string
@@ -22,8 +26,9 @@ export type ModelStatus =
 
 export interface GenerateRequest {
   prompt: string
-  // PNG/JPEG bytes of the image to edit; omit for text-to-image.
-  initImage?: Uint8Array
+  // PNG/JPEG bytes of the reference images, in @image1..@imageN order.
+  // Empty or omitted for text-to-image.
+  initImages?: Uint8Array[]
   width: number
   height: number
   steps: number

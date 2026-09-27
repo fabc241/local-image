@@ -10,6 +10,13 @@ export interface SourceImage {
   name: string
 }
 
+// A reference image in the edit tray. Its tag (@image1, …) is its position.
+export interface RefImage extends SourceImage {
+  id: number
+  // Short description spelled out next to the tag, e.g. "the orange cat".
+  label: string
+}
+
 // FLUX latents are 8x downsampled and 2x2 patchified, so sides must be
 // multiples of 16 to avoid padding artifacts.
 const SIDE_MULTIPLE = 16

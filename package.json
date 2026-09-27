@@ -15,7 +15,8 @@
     "build": "npm run typecheck && electron-vite build",
     "package": "electron-vite build && electron-forge package --platform=darwin --arch=arm64",
     "make": "electron-vite build && electron-forge make --platform=darwin --arch=arm64",
-    "smoke": "node scripts/smoke.ts"
+    "smoke": "node scripts/smoke.ts",
+    "test": "node scripts/tags.test.ts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

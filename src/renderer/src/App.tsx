@@ -6,7 +6,18 @@ import type {
   StepProgress,
   StudioInfo
 } from '../../shared/types'
-import { fitAspect, formatBytes, loadSourceImage, pngToUrl, type SourceImage } from './image'
+import { MAX_REFERENCE_IMAGES } from '../../shared/types'
+import { PromptEditor, type PromptEditorHandle } from './components/PromptEditor'
+import { ReferenceTray } from './components/ReferenceTray'
+import { fitAspect, formatBytes, loadSourceImage, pngToUrl, type RefImage } from './image'
+import {
+  expandPrompt,
+  referencedIndexes,
+  renumberAfterMove,
+  renumberAfterRemoval,
+  tagFor,
+  unknownTags
+} from './tags'
 
 type Mode = 'create' | 'edit'
 
@@ -45,7 +56,7 @@ function App(): React.JSX.Element {
 
   const [mode, setMode] = useState<Mode>('create')
   const [prompt, setPrompt] = useState('')
-  const [source, setSource] = useState<SourceImage | null>(null)
+  const [refs, setRefs] = useState<RefImage[]>([])
   const [sizeId, setSizeId] = useState<string>('sq1024')
   const [steps, setSteps] = useState(4)
   const [guidance, setGuidance] = useState(3.5)
@@ -57,8 +68,9 @@ function App(): React.JSX.Element {
   const [results, setResults] = useState<Result[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  const fileInput = useRef<HTMLInputElement>(null)
   const nextId = useRef(1)
+  const nextRefId = useRef(1)
+  const promptEditor = useRef<PromptEditorHandle>(null)
 
   useEffect(() => {
     window.studio.info().then(setInfo)
@@ -73,45 +85,85 @@ function App(): React.JSX.Element {
 
   const ready = status.state === 'ready'
   const current = results.find((r) => r.id === selected) ?? results[0] ?? null
+  const editRefs = useMemo(() => (mode === 'edit' ? refs : []), [mode, refs])
+  const first = editRefs[0]
 
   const [width, height] = useMemo<[number, number]>(() => {
-    if (mode === 'edit' && sizeId === MATCH_INPUT && source) {
+    if (sizeId === MATCH_INPUT && first) {
       return fitAspect(
-        source.width,
-        source.height,
-        Math.min(1024, Math.max(source.width, source.height))
+        first.width,
+        first.height,
+        Math.min(1024, Math.max(first.width, first.height))
       )
     }
     const preset = SIZE_PRESETS.find((p) => p.id === sizeId) ?? SIZE_PRESETS[0]
     return [preset.w, preset.h]
-  }, [mode, sizeId, source])
+  }, [sizeId, first])
 
-  const acceptFile = useCallback(async (file: File | Blob, name: string) => {
+  const labels = useMemo(() => editRefs.map((r) => r.label), [editRefs])
+  const sentPrompt = useMemo(() => expandPrompt(prompt.trim(), labels), [prompt, labels])
+  const badTags = useMemo(() => unknownTags(prompt, editRefs.length), [prompt, editRefs.length])
+  const referenced = useMemo(() => referencedIndexes(prompt), [prompt])
+
+  // Appends images to the tray (up to the limit) and switches to Edit mode.
+  const addFiles = useCallback(async (files: (File | Blob)[], names: string[], replace = false) => {
     setError(null)
-    try {
-      const img = await loadSourceImage(file, name)
-      setSource((old) => {
-        if (old) URL.revokeObjectURL(old.url)
-        return img
-      })
-      setMode('edit')
-      setSizeId(MATCH_INPUT)
-    } catch {
-      setError(`Could not read "${name}" as an image.`)
+    const loaded: RefImage[] = []
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const img = await loadSourceImage(files[i], names[i])
+        loaded.push({ ...img, id: nextRefId.current++, label: '' })
+      } catch {
+        setError(`Could not read "${names[i]}" as an image.`)
+      }
     }
+    if (loaded.length === 0) return
+    setRefs((prev) => {
+      const base = replace ? [] : prev
+      if (replace) prev.forEach((r) => URL.revokeObjectURL(r.url))
+      const room = MAX_REFERENCE_IMAGES - base.length
+      if (loaded.length > room) {
+        setError(`Up to ${MAX_REFERENCE_IMAGES} images; extra images were skipped.`)
+        loaded.slice(room).forEach((r) => URL.revokeObjectURL(r.url))
+      }
+      return [...base, ...loaded.slice(0, room)]
+    })
+    setMode('edit')
+    setSizeId(MATCH_INPUT)
   }, [])
 
-  const editResult = useCallback(
-    (r: Result) => {
-      acceptFile(new Blob([r.png as BlobPart], { type: 'image/png' }), `result-${r.id}.png`)
-    },
-    [acceptFile]
-  )
+  const removeRef = useCallback((index: number) => {
+    setRefs((prev) => {
+      URL.revokeObjectURL(prev[index].url)
+      return prev.filter((_, i) => i !== index)
+    })
+    setPrompt((p) => renumberAfterRemoval(p, index))
+  }, [])
+
+  const moveRef = useCallback((from: number, to: number) => {
+    setRefs((prev) => {
+      const next = [...prev]
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
+      return next
+    })
+    setPrompt((p) => renumberAfterMove(p, from, to))
+  }, [])
+
+  const setLabel = useCallback((index: number, label: string) => {
+    setRefs((prev) => prev.map((r, i) => (i === index ? { ...r, label } : r)))
+  }, [])
+
+  const resultBlob = (r: Result): Blob => new Blob([r.png as BlobPart], { type: 'image/png' })
 
   const generate = useCallback(async () => {
     if (!prompt.trim() || busy) return
-    if (mode === 'edit' && !source) {
-      setError('Add an image to edit first.')
+    if (mode === 'edit' && editRefs.length === 0) {
+      setError('Add at least one image to edit.')
+      return
+    }
+    if (badTags.length > 0) {
+      setError(`${badTags.join(', ')} doesn't match any image in the tray.`)
       return
     }
     setBusy(true)
@@ -120,8 +172,8 @@ function App(): React.JSX.Element {
     try {
       const parsedSeed = seed.trim() === '' ? -1 : Number.parseInt(seed, 10)
       const res = await window.studio.generate({
-        prompt: prompt.trim(),
-        initImage: mode === 'edit' ? source!.bytes : undefined,
+        prompt: sentPrompt,
+        initImages: editRefs.map((r) => r.bytes),
         width,
         height,
         steps,
@@ -130,7 +182,7 @@ function App(): React.JSX.Element {
       })
       const id = nextId.current++
       setResults((prev) => [
-        { id, url: pngToUrl(res.png), prompt: prompt.trim(), mode, width, height, ...res },
+        { id, url: pngToUrl(res.png), prompt: sentPrompt, mode, width, height, ...res },
         ...prev
       ])
       setSelected(id)
@@ -140,7 +192,7 @@ function App(): React.JSX.Element {
       setBusy(false)
       setProgress(null)
     }
-  }, [prompt, busy, mode, source, seed, width, height, steps, guidance])
+  }, [prompt, busy, mode, editRefs, badTags, sentPrompt, seed, width, height, steps, guidance])
 
   const save = useCallback(async (r: Result) => {
     const path = await window.studio.saveImage(r.png, `local-image-${r.mode}-${r.seed ?? r.id}.png`)
@@ -150,8 +202,12 @@ function App(): React.JSX.Element {
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
     setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) acceptFile(file, file.name)
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'))
+    if (files.length)
+      addFiles(
+        files,
+        files.map((f) => f.name)
+      )
   }
 
   return (
@@ -190,7 +246,7 @@ function App(): React.JSX.Element {
             className={mode === 'edit' ? 'active' : ''}
             onClick={() => {
               setMode('edit')
-              if (source) setSizeId(MATCH_INPUT)
+              if (refs.length) setSizeId(MATCH_INPUT)
             }}
           >
             Edit
@@ -199,37 +255,32 @@ function App(): React.JSX.Element {
 
         {mode === 'edit' && (
           <div className="field">
-            <label>Image to edit</label>
-            <button
-              className={`dropzone ${source ? 'has-image' : ''}`}
-              onClick={() => fileInput.current?.click()}
-            >
-              {source ? (
-                <>
-                  <img src={source.url} alt="" />
-                  <span className="dropzone-caption">
-                    {source.name} · {source.width}×{source.height} · click to replace
-                  </span>
-                </>
-              ) : (
-                <span>
-                  Drop an image here
-                  <br />
-                  <small>or click to choose (PNG, JPEG, WebP)</small>
-                </span>
-              )}
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/bmp,image/gif"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) acceptFile(f, f.name)
-                e.target.value = ''
-              }}
+            <label>
+              Images to edit{' '}
+              <span className="hint">
+                · {refs.length}/{MAX_REFERENCE_IMAGES}
+              </span>
+            </label>
+            <ReferenceTray
+              refs={refs}
+              max={MAX_REFERENCE_IMAGES}
+              referenced={referenced}
+              onAddFiles={(files) =>
+                addFiles(
+                  files,
+                  files.map((f) => f.name)
+                )
+              }
+              onRemove={removeRef}
+              onMove={moveRef}
+              onLabel={setLabel}
+              onInsertTag={(i) => promptEditor.current?.insertTag(i)}
             />
+            {refs.length > 1 && (
+              <small className="hint">
+                Several images are combined in one result; each one adds generation time.
+              </small>
+            )}
           </div>
         )}
 
@@ -237,26 +288,39 @@ function App(): React.JSX.Element {
           <label htmlFor="prompt">
             {mode === 'create' ? 'Describe the image' : 'Describe the edit'}
           </label>
-          <textarea
+          <PromptEditor
+            ref={promptEditor}
             id="prompt"
-            rows={5}
             value={prompt}
+            refs={editRefs}
+            onChange={setPrompt}
+            onSubmit={generate}
             placeholder={
               mode === 'create'
                 ? 'A lighthouse on a rocky coast at dusk, volumetric light, 35mm photo'
-                : 'Turn it into a watercolor painting, keep the composition'
+                : refs.length > 1
+                  ? `Put the cat from ${tagFor(0)} on the sofa from ${tagFor(1)}, keep the lighting of ${tagFor(1)}`
+                  : 'Turn it into a watercolor painting, keep the composition'
             }
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generate()
-            }}
           />
+          {badTags.length > 0 && (
+            <small className="warn">
+              {badTags.join(', ')} doesn&apos;t match any image in the tray.
+            </small>
+          )}
+          {editRefs.length > 0 && sentPrompt !== prompt.trim() && prompt.trim() && (
+            <small className="hint sent-prompt">
+              <strong>Sent to the model:</strong> {sentPrompt}
+            </small>
+          )}
         </div>
 
         <div className="field">
           <label htmlFor="size">Output size</label>
           <select id="size" value={sizeId} onChange={(e) => setSizeId(e.target.value)}>
-            {mode === 'edit' && source && <option value={MATCH_INPUT}>Match input aspect</option>}
+            {mode === 'edit' && first && (
+              <option value={MATCH_INPUT}>Match {tagFor(0)} aspect</option>
+            )}
             {SIZE_PRESETS.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
@@ -313,7 +377,11 @@ function App(): React.JSX.Element {
           <button
             className="primary"
             disabled={
-              busy || !prompt.trim() || status.state === 'loading' || (mode === 'edit' && !source)
+              busy ||
+              !prompt.trim() ||
+              status.state === 'loading' ||
+              (mode === 'edit' && refs.length === 0) ||
+              badTags.length > 0
             }
             onClick={generate}
           >
@@ -369,9 +437,26 @@ function App(): React.JSX.Element {
                     <button className="secondary" onClick={() => save(current)}>
                       Save PNG…
                     </button>
-                    <button className="secondary" onClick={() => editResult(current)}>
+                    <button
+                      className="secondary"
+                      title="Start a new edit with only this image"
+                      onClick={() =>
+                        addFiles([resultBlob(current)], [`result-${current.id}.png`], true)
+                      }
+                    >
                       Edit this image
                     </button>
+                    {refs.length < MAX_REFERENCE_IMAGES && (
+                      <button
+                        className="secondary"
+                        title={`Add to the edit tray as ${tagFor(refs.length)}`}
+                        onClick={() =>
+                          addFiles([resultBlob(current)], [`result-${current.id}.png`])
+                        }
+                      >
+                        Add as {tagFor(refs.length)}
+                      </button>
+                    )}
                   </span>
                 </figcaption>
               </figure>
@@ -419,7 +504,7 @@ function App(): React.JSX.Element {
         )}
       </footer>
 
-      {dragOver && <div className="drop-hint">Drop to edit this image</div>}
+      {dragOver && <div className="drop-hint">Drop images to add them to the edit</div>}
     </div>
   )
 }

@@ -221,38 +221,6 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgb(124 108 255 / 0.2);
 }
 
-.dropzone {
-  border: 1px dashed var(--border);
-  background: var(--bg);
-  border-radius: var(--radius);
-  min-height: 140px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  color: var(--muted);
-  padding: 10px;
-  text-align: center;
-}
-
-.dropzone:hover,
-.drag-over .dropzone {
-  border-color: var(--accent);
-}
-
-.dropzone img {
-  max-width: 100%;
-  max-height: 200px;
-  border-radius: 6px;
-}
-
-.dropzone-caption {
-  font-size: 11px;
-  word-break: break-all;
-}
-
 .actions {
   display: flex;
   gap: 8px;
@@ -566,4 +534,266 @@ kbd {
   font-weight: 600;
   pointer-events: none;
   z-index: 10;
+}
+
+/* Reference tray */
+.ref-tray {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ref-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ref-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 2px solid var(--tag);
+}
+
+.ref-card.unreferenced .ref-thumb {
+  border-style: dashed;
+}
+
+.ref-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ref-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+}
+
+.ref-tools {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.ref-thumb:hover .ref-tools {
+  opacity: 1;
+}
+
+.ref-tools button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 0;
+  background: rgb(0 0 0 / 0.65);
+  color: white;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 14px;
+}
+
+.ref-tools button:hover {
+  background: rgb(0 0 0 / 0.85);
+}
+
+.ref-label {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.ref-add {
+  aspect-ratio: 1;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.ref-add.empty {
+  aspect-ratio: auto;
+  min-height: 130px;
+}
+
+.ref-add {
+  grid-column: 1 / -1;
+}
+
+.ref-add:not(.empty) {
+  aspect-ratio: auto;
+  flex-direction: row;
+  padding: 7px;
+}
+
+.ref-add:not(.empty) .ref-add-plus {
+  font-size: 16px;
+}
+
+.ref-add:hover,
+.drag-over .ref-add {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.ref-add-plus {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* Tag chips */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font:
+    600 11px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: white;
+  background: var(--tag);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tag-chip-label {
+  font:
+    500 11px/1.5 -apple-system,
+    system-ui,
+    sans-serif;
+  opacity: 0.85;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Prompt editor with tag highlighting */
+.prompt-box {
+  position: relative;
+}
+
+.prompt-backdrop,
+.prompt-box textarea {
+  font: inherit;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  letter-spacing: normal;
+}
+
+.prompt-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  background: var(--bg);
+  pointer-events: none;
+}
+
+.prompt-box textarea {
+  position: relative;
+  display: block;
+  background: transparent;
+  border-color: var(--border);
+  caret-color: var(--text);
+}
+
+.prompt-backdrop mark {
+  color: transparent;
+  border-radius: 4px;
+}
+
+.prompt-backdrop mark.tag {
+  background: color-mix(in srgb, var(--tag) 38%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tag) 70%, transparent);
+}
+
+.prompt-backdrop mark.tag-unknown {
+  background: rgb(255 107 107 / 0.25);
+  box-shadow: 0 0 0 1px var(--bad);
+}
+
+.tag-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: calc(100% + 4px);
+  z-index: 20;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.5);
+}
+
+.tag-menu li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.tag-menu li.active {
+  background: var(--border);
+}
+
+.tag-menu img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+
+.tag-menu-label {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warn {
+  color: var(--bad);
+  font-size: 11px;
+}
+
+.sent-prompt {
+  user-select: text;
+  line-height: 1.4;
 }

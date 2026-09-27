@@ -5,7 +5,21 @@ A macOS app that creates images from a text prompt, or edits an image you give i
 It's built on the [QVAC SDK](https://github.com/tetherto/qvac) by Tether (`@qvac/sdk`), which provides the model registry, downloads, and the stable-diffusion.cpp inference engine with Metal acceleration.
 
 - **Create:** text → image.
-- **Edit:** drop an image anywhere in the window, describe the change, and it uses FLUX.2 in-context conditioning. Use **Edit this image** to chain edits.
+- **Edit:** drop one or more images (up to 4) anywhere in the window and describe the change. Use **Edit this image** to chain edits, or **Add as @imageN** to use a result as another reference.
+
+## Multi-image editing with tags
+
+Every image in the Edit tray gets a colored tag: `@image1`, `@image2`, and so on, in tray order. Refer to the images by tag in the prompt:
+
+> Place `@image1` sitting on the sofa in `@image2`, keep the room and its daylight unchanged
+
+- **Type `@`** in the prompt to open a picker with each image's thumbnail. Use ↑/↓ and Enter, or click. You can also click an image's badge, or the chips under the prompt, to insert its tag at the cursor.
+- **Tags are highlighted** in their image's color. A tag with no matching image is flagged in red and blocks generation.
+- **Label each image** ("What is it?", e.g. "the fox"). FLUX.2 [klein]'s text encoder never sees the images, so a tag on its own is just a word to the model. The app spells each label out next to its tag's first mention, e.g. `@image1 (the fox)`, which helps the model match words to pictures. "Sent to the model" under the prompt shows the exact text.
+- **Remove or reorder** an image (hover its thumbnail) and the tags already in the prompt are renumbered to match. Mentions of a removed image become plain "image", so they never silently point at a different picture.
+- An image the prompt doesn't mention is drawn with a dashed border. It's still used as a reference.
+
+With one image the app sends a normal FLUX.2 edit (`init_image`); with several it uses multi-reference fusion (`init_images`). Each reference adds its full latent to the attention context, so time grows with every image. On an M4, a 512×512 edit with two references takes about 1.5 minutes.
 
 ## Engine configuration
 
@@ -43,6 +57,12 @@ A headless end-to-end check uses the same config. It generates one image, edits 
 
 ```bash
 npm run smoke -- ./smoke-out
+```
+
+Unit tests for the tag helpers:
+
+```bash
+npm test
 ```
 
 ## Package
