@@ -71,7 +71,9 @@ export const PromptEditor = forwardRef<PromptEditorHandle, Props>(function Promp
       return
     }
     const q = activeTagQuery(el.value, el.selectionStart)
-    setSuggest(q ? { ...q, active: 0 } : null)
+    // A fully typed tag like "@image2" needs no menu.
+    const complete = q && /^image\d+$/.test(q.query) && Number(q.query.slice(5)) <= refs.length
+    setSuggest(q && !complete ? { ...q, active: 0 } : null)
   }
 
   const pick = (index: number): void => {

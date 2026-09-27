@@ -9,6 +9,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 
 const studio: StudioAPI = {
   info: () => ipcRenderer.invoke('studio:info'),
+  status: () => ipcRenderer.invoke('studio:get-status'),
   loadModel: () => ipcRenderer.invoke('studio:load'),
   generate: (req) => ipcRenderer.invoke('studio:generate', req),
   cancel: () => ipcRenderer.invoke('studio:cancel'),

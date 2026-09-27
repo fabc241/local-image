@@ -1,6 +1,6 @@
 // Unit tests for the @imageN tag helpers: npm test
 import assert from 'node:assert/strict'
-import { renumberAfterRemoval, renumberAfterMove, expandPrompt, unknownTags, activeTagQuery, segmentPrompt } from '../src/renderer/src/tags.ts'
+import { renumberAfterRemoval, renumberAfterMove, expandPrompt, unknownTags, activeTagQuery, segmentPrompt, promptForSingleImage } from '../src/renderer/src/tags.ts'
 const p = 'Put @image1 on @image2 next to @image3'
 assert.equal(renumberAfterRemoval(p, 0), 'Put image on @image1 next to @image2')
 assert.equal(renumberAfterRemoval(p, 1), 'Put @image1 on image next to @image2')
@@ -15,3 +15,8 @@ assert.equal(activeTagQuery('mail me@home', 12), null)
 assert.equal(activeTagQuery('Place @image1 on', 16), null)
 assert.equal(segmentPrompt('a @image1 b', 1).filter(s => s.ref !== undefined).length, 1)
 console.log('all tag tests passed')
+
+assert.equal(promptForSingleImage('a red background in @image1 and @image2', ''), 'a red background in the image')
+assert.equal(promptForSingleImage('make @image1, @image2 & @image3 black and white', 'the family'), 'make the image (the family) black and white')
+assert.equal(promptForSingleImage('turn it into a watercolor', 'x'), 'turn it into a watercolor')
+console.log('single-image prompt tests passed')

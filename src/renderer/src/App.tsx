@@ -12,6 +12,7 @@ import { ReferenceTray } from './components/ReferenceTray'
 import { fitAspect, formatBytes, loadSourceImage, pngToUrl, type RefImage } from './image'
 import {
   expandPrompt,
+  promptForSingleImage,
   referencedIndexes,
   renumberAfterMove,
   renumberAfterRemoval,
@@ -20,6 +21,8 @@ import {
 } from './tags'
 
 type Mode = 'create' | 'edit'
+// With several images: merge them into one result, or run the edit on each.
+type MultiMode = 'combine' | 'each'
 
 interface Result {
   id: number
@@ -61,9 +64,13 @@ function App(): React.JSX.Element {
   const [steps, setSteps] = useState(4)
   const [guidance, setGuidance] = useState(3.5)
   const [seed, setSeed] = useState('')
+  const [multi, setMulti] = useState<MultiMode>('combine')
 
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<StepProgress | null>(null)
+  // Position within an "edit each separately" run.
+  const [batch, setBatch] = useState<{ index: number; total: number } | null>(null)
+  const cancelled = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<Result[]>([])
   const [selected, setSelected] = useState<number | null>(null)
@@ -74,6 +81,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     window.studio.info().then(setInfo)
+    window.studio.status().then(setStatus)
     const offs = [
       window.studio.onStatus(setStatus),
       window.studio.onDownload((p) => setDownloads((d) => ({ ...d, [p.file]: p }))),
@@ -87,21 +95,29 @@ function App(): React.JSX.Element {
   const current = results.find((r) => r.id === selected) ?? results[0] ?? null
   const editRefs = useMemo(() => (mode === 'edit' ? refs : []), [mode, refs])
   const first = editRefs[0]
+  const eachMode = editRefs.length > 1 && multi === 'each'
 
-  const [width, height] = useMemo<[number, number]>(() => {
-    if (sizeId === MATCH_INPUT && first) {
-      return fitAspect(
-        first.width,
-        first.height,
-        Math.min(1024, Math.max(first.width, first.height))
-      )
-    }
-    const preset = SIZE_PRESETS.find((p) => p.id === sizeId) ?? SIZE_PRESETS[0]
-    return [preset.w, preset.h]
-  }, [sizeId, first])
+  // Output size for a run; "match" follows the given image's aspect ratio.
+  const sizeFor = useCallback(
+    (img: RefImage | undefined): [number, number] => {
+      if (sizeId === MATCH_INPUT && img) {
+        return fitAspect(img.width, img.height, Math.min(1024, Math.max(img.width, img.height)))
+      }
+      const preset = SIZE_PRESETS.find((p) => p.id === sizeId) ?? SIZE_PRESETS[0]
+      return [preset.w, preset.h]
+    },
+    [sizeId]
+  )
+  const [width, height] = sizeFor(first)
 
   const labels = useMemo(() => editRefs.map((r) => r.label), [editRefs])
-  const sentPrompt = useMemo(() => expandPrompt(prompt.trim(), labels), [prompt, labels])
+  const sentPrompt = useMemo(
+    () =>
+      eachMode
+        ? promptForSingleImage(prompt.trim(), labels[0] ?? '')
+        : expandPrompt(prompt.trim(), labels),
+    [eachMode, prompt, labels]
+  )
   const badTags = useMemo(() => unknownTags(prompt, editRefs.length), [prompt, editRefs.length])
   const referenced = useMemo(() => referencedIndexes(prompt), [prompt])
 
@@ -166,33 +182,68 @@ function App(): React.JSX.Element {
       setError(`${badTags.join(', ')} doesn't match any image in the tray.`)
       return
     }
+    // One run per image in "edit each" mode; otherwise a single run that
+    // uses every image (plain edit for one, fusion for several).
+    const jobs = eachMode
+      ? editRefs.map((r) => ({
+          prompt: promptForSingleImage(prompt.trim(), r.label),
+          images: [r.bytes],
+          size: sizeFor(r)
+        }))
+      : [{ prompt: sentPrompt, images: editRefs.map((r) => r.bytes), size: sizeFor(first) }]
+
     setBusy(true)
     setError(null)
-    setProgress(null)
+    cancelled.current = false
+    const parsedSeed = seed.trim() === '' ? -1 : Number.parseInt(seed, 10)
     try {
-      const parsedSeed = seed.trim() === '' ? -1 : Number.parseInt(seed, 10)
-      const res = await window.studio.generate({
-        prompt: sentPrompt,
-        initImages: editRefs.map((r) => r.bytes),
-        width,
-        height,
-        steps,
-        guidance,
-        seed: Number.isFinite(parsedSeed) ? parsedSeed : -1
-      })
-      const id = nextId.current++
-      setResults((prev) => [
-        { id, url: pngToUrl(res.png), prompt: sentPrompt, mode, width, height, ...res },
-        ...prev
-      ])
-      setSelected(id)
+      for (let i = 0; i < jobs.length && !cancelled.current; i++) {
+        const job = jobs[i]
+        const [w, h] = job.size
+        setProgress(null)
+        setBatch(jobs.length > 1 ? { index: i, total: jobs.length } : null)
+        const res = await window.studio.generate({
+          prompt: job.prompt,
+          initImages: job.images,
+          width: w,
+          height: h,
+          steps,
+          guidance,
+          seed: Number.isFinite(parsedSeed) ? parsedSeed : -1
+        })
+        const id = nextId.current++
+        setResults((prev) => [
+          { id, url: pngToUrl(res.png), prompt: job.prompt, mode, width: w, height: h, ...res },
+          ...prev
+        ])
+        setSelected(id)
+      }
     } catch (err) {
       setError(cleanError(err))
     } finally {
       setBusy(false)
       setProgress(null)
+      setBatch(null)
     }
-  }, [prompt, busy, mode, editRefs, badTags, sentPrompt, seed, width, height, steps, guidance])
+  }, [
+    prompt,
+    busy,
+    mode,
+    editRefs,
+    eachMode,
+    first,
+    badTags,
+    sentPrompt,
+    sizeFor,
+    seed,
+    steps,
+    guidance
+  ])
+
+  const cancel = useCallback(() => {
+    cancelled.current = true
+    window.studio.cancel()
+  }, [])
 
   const save = useCallback(async (r: Result) => {
     const path = await window.studio.saveImage(r.png, `local-image-${r.mode}-${r.seed ?? r.id}.png`)
@@ -277,9 +328,31 @@ function App(): React.JSX.Element {
               onInsertTag={(i) => promptEditor.current?.insertTag(i)}
             />
             {refs.length > 1 && (
-              <small className="hint">
-                Several images are combined in one result; each one adds generation time.
-              </small>
+              <div className="multi-mode">
+                <div className="segmented small" role="radiogroup" aria-label="Multiple images">
+                  <button
+                    role="radio"
+                    aria-checked={multi === 'combine'}
+                    className={multi === 'combine' ? 'active' : ''}
+                    onClick={() => setMulti('combine')}
+                  >
+                    Combine into one
+                  </button>
+                  <button
+                    role="radio"
+                    aria-checked={multi === 'each'}
+                    className={multi === 'each' ? 'active' : ''}
+                    onClick={() => setMulti('each')}
+                  >
+                    Edit each separately
+                  </button>
+                </div>
+                <small className="hint">
+                  {multi === 'combine'
+                    ? 'The images are merged into one result. Tag them in the prompt to say what comes from where.'
+                    : `The same edit runs on each image, giving ${refs.length} results. Tags aren't needed.`}
+                </small>
+              </div>
             )}
           </div>
         )}
@@ -310,7 +383,8 @@ function App(): React.JSX.Element {
           )}
           {editRefs.length > 0 && sentPrompt !== prompt.trim() && prompt.trim() && (
             <small className="hint sent-prompt">
-              <strong>Sent to the model:</strong> {sentPrompt}
+              <strong>{eachMode ? `Sent for ${tagFor(0)}:` : 'Sent to the model:'}</strong>{' '}
+              {sentPrompt}
             </small>
           )}
         </div>
@@ -319,7 +393,9 @@ function App(): React.JSX.Element {
           <label htmlFor="size">Output size</label>
           <select id="size" value={sizeId} onChange={(e) => setSizeId(e.target.value)}>
             {mode === 'edit' && first && (
-              <option value={MATCH_INPUT}>Match {tagFor(0)} aspect</option>
+              <option value={MATCH_INPUT}>
+                {eachMode ? 'Match each image' : `Match ${tagFor(0)} aspect`}
+              </option>
             )}
             {SIZE_PRESETS.map((p) => (
               <option key={p.id} value={p.id}>
@@ -328,7 +404,9 @@ function App(): React.JSX.Element {
             ))}
           </select>
           <small className="hint">
-            {width} × {height}px
+            {eachMode && sizeId === MATCH_INPUT
+              ? 'Each image keeps its own aspect ratio'
+              : `${width} × ${height}px`}
           </small>
         </div>
 
@@ -370,7 +448,7 @@ function App(): React.JSX.Element {
 
         <div className="actions">
           {busy ? (
-            <button className="secondary" onClick={() => window.studio.cancel()}>
+            <button className="secondary" onClick={cancel}>
               Cancel
             </button>
           ) : null}
@@ -385,7 +463,13 @@ function App(): React.JSX.Element {
             }
             onClick={generate}
           >
-            {busy ? 'Generating…' : mode === 'create' ? 'Generate' : 'Apply edit'}
+            {busy
+              ? 'Generating…'
+              : mode === 'create'
+                ? 'Generate'
+                : eachMode
+                  ? `Apply to ${editRefs.length} images`
+                  : 'Apply edit'}
             {!busy && <kbd>⌘↵</kbd>}
           </button>
         </div>
@@ -411,9 +495,11 @@ function App(): React.JSX.Element {
                 <div>
                   {status.state === 'loading'
                     ? 'Loading model…'
-                    : progress
-                      ? `Step ${progress.step} of ${progress.totalSteps}`
-                      : 'Encoding prompt…'}
+                    : `${batch ? `Image ${batch.index + 1} of ${batch.total} · ` : ''}${
+                        progress
+                          ? `Step ${progress.step} of ${progress.totalSteps}`
+                          : 'Encoding prompt…'
+                      }`}
                 </div>
                 {progress && (
                   <div className="bar">

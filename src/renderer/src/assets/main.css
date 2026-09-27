@@ -224,6 +224,13 @@ textarea:focus {
 .actions {
   display: flex;
   gap: 8px;
+  /* Keep the action button reachable when the panel scrolls. */
+  position: sticky;
+  bottom: -16px;
+  z-index: 5;
+  margin: 0 -16px;
+  padding: 12px 16px 16px;
+  background: linear-gradient(to bottom, rgb(24 24 27 / 0), var(--panel) 12px);
 }
 
 .actions .primary {
@@ -796,4 +803,16 @@ kbd {
 .sent-prompt {
   user-select: text;
   line-height: 1.4;
+}
+
+.multi-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.segmented.small button {
+  padding: 5px 0;
+  font-size: 12px;
 }

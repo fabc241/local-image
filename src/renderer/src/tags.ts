@@ -102,3 +102,15 @@ export function activeTagQuery(
   if (!m) return null
   return { start: caret - m[2].length - 1, query: m[2].toLowerCase() }
 }
+
+// "Edit each separately": each run sees a single image, so every tag becomes
+// "the image" (with that image's label, if any), and lists that only named
+// the images ("in @image1 and @image2") collapse to one mention.
+export function promptForSingleImage(prompt: string, label: string): string {
+  const generic = prompt
+    .replace(TAG_PATTERN, 'the image')
+    .replace(/the image(?:\s*(?:,|\band\b|&)\s*the image)+/g, 'the image')
+    .replace(/ +([,.;:!?])/g, '$1')
+  const text = label.trim()
+  return text ? generic.replace('the image', `the image (${text})`) : generic
+}

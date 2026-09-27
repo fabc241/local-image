@@ -65,6 +65,8 @@ export interface StudioInfo {
 
 export interface StudioAPI {
   info: () => Promise<StudioInfo>
+  // Current model state; a window opened after the model loaded needs it.
+  status: () => Promise<ModelStatus>
   loadModel: () => Promise<ModelStatus>
   generate: (req: GenerateRequest) => Promise<GenerateResult>
   cancel: () => Promise<void>

@@ -55,7 +55,7 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('studio:info', () => studio.info())
-  ipcMain.handle('studio:status', () => studio.getStatus())
+  ipcMain.handle('studio:get-status', () => studio.getStatus())
   ipcMain.handle('studio:load', () => studio.load())
   ipcMain.handle('studio:generate', (_e, req: GenerateRequest) => studio.generate(req))
   ipcMain.handle('studio:cancel', () => studio.cancel())

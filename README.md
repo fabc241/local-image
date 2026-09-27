@@ -19,7 +19,14 @@ Every image in the Edit tray gets a colored tag: `@image1`, `@image2`, and so on
 - **Remove or reorder** an image (hover its thumbnail) and the tags already in the prompt are renumbered to match. Mentions of a removed image become plain "image", so they never silently point at a different picture.
 - An image the prompt doesn't mention is drawn with a dashed border. It's still used as a reference.
 
-With one image the app sends a normal FLUX.2 edit (`init_image`); with several it uses multi-reference fusion (`init_images`). Each reference adds its full latent to the attention context, so time grows with every image. On an M4, a 512×512 edit with two references takes about 1.5 minutes.
+### Combine into one, or edit each separately
+
+With two or more images, choose what the edit does:
+
+- **Combine into one:** the images are merged into a single result (FLUX.2 multi-reference fusion, `init_images`). Use tags to say what comes from where, for example "the fox from `@image1` on the sofa from `@image2`".
+- **Edit each separately:** the same prompt runs on every image in turn (a plain edit, `init_image`), giving one result per image. Tags aren't needed; any tags become "the image", so "a red background in `@image1` and `@image2`" is sent as "a red background in the image" for each one. With "Match each image", every result keeps its own aspect ratio.
+
+A single image is always sent as a plain FLUX.2 edit (`init_image`). In Combine mode each reference adds its full latent to the attention context, so time grows with every image. On an M4, a 512×512 edit with two references takes about 1.5 minutes.
 
 ## Engine configuration
 
