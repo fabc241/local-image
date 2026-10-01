@@ -10,7 +10,6 @@ import type {
   StepProgress,
   StudioInfo
 } from '../shared/types'
-import { MAX_REFERENCE_IMAGES } from '../shared/types'
 import {
   DIFFUSION_MODEL,
   GPU_BACKEND,
@@ -19,8 +18,6 @@ import {
   MODELS,
   MODEL_CONFIG
 } from './modelConfig'
-
-const MAX_INIT_IMAGE_BYTES = 3 * 1024 * 1024
 
 type DiffusionParams = Parameters<typeof diffusion>[0]
 
@@ -100,16 +97,8 @@ export class Studio {
       throw new Error(status.state === 'error' ? status.message : 'Model is not loaded')
     }
     if (this.generating) throw new Error('A generation is already running')
+    // Count and size limits are enforced by parseGenerateRequest (validate.ts).
     const refs = req.initImages ?? []
-    if (refs.length > MAX_REFERENCE_IMAGES) {
-      throw new Error(`Use at most ${MAX_REFERENCE_IMAGES} reference images`)
-    }
-    // The SDK's base64 validation overflows the stack on very large payloads.
-    refs.forEach((img, i) => {
-      if (img.byteLength > MAX_INIT_IMAGE_BYTES) {
-        throw new Error(`@image${i + 1} is too large; use one under 3 MB`)
-      }
-    })
     this.generating = true
     // Resolve a random seed here so the result reports a reproducible value.
     const seed = req.seed >= 0 ? req.seed : Math.floor(Math.random() * 2 ** 31)

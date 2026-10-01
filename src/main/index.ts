@@ -1,9 +1,13 @@
-import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, type IpcMainInvokeEvent } from 'electron'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import type { GenerateRequest } from '../shared/types'
+import { assertTrustedSender, denyAllPermissions, hardenWindow } from './security'
 import { Studio } from './studio'
+import { parseGenerateRequest, parseSaveRequest } from './validate'
+
+// The electron-vite dev server, when running `npm run dev`.
+const DEV_SERVER_URL = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
 
 let mainWindow: BrowserWindow | null = null
 
@@ -30,38 +34,47 @@ function createWindow(): void {
     backgroundColor: '#111113',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webviewTag: false
     }
   })
+  hardenWindow(mainWindow, DEV_SERVER_URL)
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
-
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  if (DEV_SERVER_URL) {
+    mainWindow.loadURL(DEV_SERVER_URL)
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
+// Registers an IPC handler that only answers the app's own page.
+function handle(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedSender(event, DEV_SERVER_URL)
+    return listener(event, ...args)
+  })
+}
+
 function registerIpc(): void {
-  ipcMain.handle('studio:info', () => studio.info())
-  ipcMain.handle('studio:get-status', () => studio.getStatus())
-  ipcMain.handle('studio:load', () => studio.load())
-  ipcMain.handle('studio:generate', (_e, req: GenerateRequest) => studio.generate(req))
-  ipcMain.handle('studio:cancel', () => studio.cancel())
-  ipcMain.handle('studio:save', async (_e, png: Uint8Array, suggestedName: string) => {
+  handle('studio:info', () => studio.info())
+  handle('studio:get-status', () => studio.getStatus())
+  handle('studio:load', () => studio.load())
+  handle('studio:generate', (_e, req) => studio.generate(parseGenerateRequest(req)))
+  handle('studio:cancel', () => studio.cancel())
+  handle('studio:save', async (_e, rawPng, rawName) => {
+    const { png, name } = parseSaveRequest(rawPng, rawName)
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow!, {
-      defaultPath: join(app.getPath('pictures'), suggestedName),
+      defaultPath: join(app.getPath('pictures'), name),
       filters: [{ name: 'PNG image', extensions: ['png'] }]
     })
     if (canceled || !filePath) return null
@@ -77,6 +90,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  denyAllPermissions(session.defaultSession)
   registerIpc()
   createWindow()
 

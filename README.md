@@ -44,6 +44,13 @@ Set `LOCAL_IMAGE_BACKEND` to override the backend assignment, for example to add
 
 Open **Engine log** at the bottom of the window to see the native stable-diffusion.cpp log (INFO level). It shows the backend picked for each module and where each model's weights live (VRAM or RAM).
 
+## Security
+
+- **No network at runtime:** once the models are cached, loading, generating and editing open no internet connections. The first model download uses QVAC's registry and peer-to-peer network.
+- **Locked-down window:** renderer sandbox and context isolation are on, Node.js integration is off, and a strict Content Security Policy is set. The window can't navigate away from the app, open pop-ups, or embed `<webview>`. Links open in the browser only if they're `https:`. Camera, microphone, notifications and every other permission are denied.
+- **Validated IPC:** the main process accepts requests only from the app's own page and validates every field: prompt length, image count and size, output size, steps, guidance and seed (`src/main/validate.ts`, tested by `npm test`).
+- **Hardened binary:** Electron fuses disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and the inspector flags. The `file://` privileges fuse stays on because the UI loads from `file://`.
+
 ## Requirements
 
 - macOS 14+ on Apple Silicon. QVAC runs CPU-only on Intel Macs, so this app targets arm64.
