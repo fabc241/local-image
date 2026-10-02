@@ -1,4 +1,10 @@
-# Local Image
+<h1 align="center">
+  <img src="docs/title.svg" alt="Local Image" height="72">
+</h1>
+
+<p align="center">
+  <img src="docs/demo.gif" alt="Local Image in action: a prompt is typed and the image appears, then one prompt turns four photos into watercolor illustrations" width="720">
+</p>
 
 A macOS app that creates images from a text prompt, or edits an image you give it, entirely on-device with FLUX.2 [klein] 4B.
 
